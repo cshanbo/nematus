@@ -16,7 +16,7 @@ from compat import fill_options
 from hypgraph import HypGraphRenderer
 
 
-def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, nbest, return_alignment, suppress_unk, return_hyp_graph):
+def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, nbest, return_alignment, suppress_unk, return_hyp_graph, alpha, beta):
 
     from theano_util import (load_params, init_theano_params)
     from nmt import (build_sampler, gen_sample, init_params)
@@ -39,7 +39,7 @@ def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, 
         tparams = init_theano_params(params)
 
         # word index
-        f_init, f_next = build_sampler(tparams, option, use_noise, trng, return_alignment=return_alignment)
+        f_init, f_next = build_sampler(tparams, option, use_noise, trng, return_alignment=return_alignment or alpha != 0. or alpha != 0.)
 
         fs_init.append(f_init)
         fs_next.append(f_next)
@@ -49,10 +49,18 @@ def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, 
         sample, score, word_probs, alignment, hyp_graph = gen_sample(fs_init, fs_next,
                                    numpy.array(seq).T.reshape([len(seq[0]), len(seq), 1]),
                                    trng=trng, k=k, maxlen=200,
-                                   stochastic=False, argmax=False, return_alignment=return_alignment,
+                                   stochastic=False, argmax=False,
+                                   return_alignment=return_alignment or alpha != 0. or beta != 0.,
                                    suppress_unk=suppress_unk, return_hyp_graph=return_hyp_graph)
 
         # normalize scores according to sequence lengths
+        if alpha != 0. or beta != 0.:
+	    lengths = numpy.array([len(s) for s in sample])
+            lp = ((lengths + 5.) ** alpha) / ((1. + 5.) ** alpha)
+            min_att = numpy.array([numpy.log(numpy.minimum(1., numpy.sum(align, axis=0))) for align in alignment])
+            cp = beta * numpy.sum(min_att, axis=1)
+            score = score / lp + cp
+
         if normalize:
             lengths = numpy.array([len(s) for s in sample])
             score = score / lengths
@@ -291,10 +299,14 @@ if __name__ == "__main__":
     parser.add_argument('--suppress-unk', action="store_true", help="Suppress hypotheses containing UNK.")
     parser.add_argument('--print-word-probabilities', '-wp',action="store_true", help="Print probabilities of each word")
     parser.add_argument('--search_graph', '-sg', help="Output file for search graph rendered as PNG image")
+    parser.add_argument('-alpha', type=float, default=0.,
+                        help="alpha for length normalization, see Google (default: %(default)s))")
+    parser.add_argument('-beta', type=float, default=0.,
+                        help="beta for coverage penalty, see Google (default: %(default)s))")
 
     args = parser.parse_args()
 
     main(args.models, args.input,
          args.output, k=args.k, normalize=args.n, n_process=args.p,
          chr_level=args.c, verbose=args.v, nbest=args.n_best, suppress_unk=args.suppress_unk, 
-         print_word_probabilities = args.print_word_probabilities, save_alignment=args.output_alignment, a_json=args.json_alignment, return_hyp_graph=args.search_graph)
+         print_word_probabilities = args.print_word_probabilities, save_alignment=args.output_alignment, a_json=args.json_alignment, return_hyp_graph=args.search_graph, alpha=args.alpha, beta=args.beta)
