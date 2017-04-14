@@ -39,7 +39,7 @@ def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, 
         tparams = init_theano_params(params)
 
         # word index
-        f_init, f_next = build_sampler(tparams, option, use_noise, trng, return_alignment=return_alignment or alpha != 0. or alpha != 0.)
+        f_init, f_next = build_sampler(tparams, option, use_noise, trng, return_alignment=return_alignment or alpha != 0. or beta != 0.)
 
         fs_init.append(f_init)
         fs_next.append(f_next)
