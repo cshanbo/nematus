@@ -54,16 +54,15 @@ def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, 
                                    suppress_unk=suppress_unk, return_hyp_graph=return_hyp_graph)
 
         # normalize scores according to sequence lengths
-        if alpha != 0. or beta != 0.:
-	    lengths = numpy.array([len(s) for s in sample])
-            lp = ((lengths + 5.) ** alpha) / ((1. + 5.) ** alpha)
-            min_att = numpy.array([numpy.log(numpy.minimum(1., numpy.sum(align, axis=0))) for align in alignment])
-            cp = beta * numpy.sum(min_att, axis=1)
-            score = score / lp + cp
-
+        lengths = numpy.array([len(s) for s in sample])
         if normalize:
-            lengths = numpy.array([len(s) for s in sample])
-            score = score / lengths
+            if alpha != 0. or beta != 0.:
+                lp = ((lengths + 5.) ** alpha) / ((1. + 5.) ** alpha)
+                min_att = numpy.array([numpy.log(numpy.minimum(1., numpy.sum(align, axis=0))) for align in alignment])
+                cp = beta * numpy.sum(min_att, axis=1)
+                score = score / lp + cp
+            else:
+                score = score / lengths
         if nbest:
             return sample, score, word_probs, alignment, hyp_graph
         else:
