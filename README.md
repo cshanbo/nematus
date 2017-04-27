@@ -199,6 +199,8 @@ preprocessing scripts, are provided in https://github.com/rsennrich/wmt16-script
 | --suppress-unk       | Suppress hypotheses containing UNK. |
 | --print-word-probabilities, -wp | Print probabilities of each word |
 | --search_graph, -sg  | Output file for search graph rendered as PNG image |
+| --alpha | Length normalization hyper-parameter of Google, if -n not set. Set to 0. to ignore |
+| --beta | Coverage penalty hyper-parameter of Google, if -n not set. Set to 0. to ignore |
 
 
 #### `nematus/score.py` : use an existing model to score a parallel corpus

@@ -56,13 +56,13 @@ def translate_model(queue, rqueue, pid, models, options, k, normalize, verbose, 
         # normalize scores according to sequence lengths
         lengths = numpy.array([len(s) for s in sample])
         if normalize:
-            if alpha != 0. or beta != 0.:
-                lp = ((lengths + 5.) ** alpha) / ((1. + 5.) ** alpha)
-                min_att = numpy.array([numpy.log(numpy.minimum(1., numpy.sum(align, axis=0))) for align in alignment])
-                cp = beta * numpy.sum(min_att, axis=1)
-                score = score / lp + cp
-            else:
-                score = score / lengths
+            score = score / lengths
+        elif alpha != 0. or beta != 0.:
+            lp = ((lengths + 5.) ** alpha) / ((1. + 5.) ** alpha)
+            min_att = numpy.array([numpy.log(numpy.minimum(1., numpy.sum(align, axis=0))) for align in alignment])
+            cp = beta * numpy.sum(min_att, axis=1)
+            score = score / lp + cp
+
         if nbest:
             return sample, score, word_probs, alignment, hyp_graph
         else:
