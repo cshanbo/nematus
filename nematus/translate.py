@@ -16,7 +16,9 @@ from compat import fill_options
 from hypgraph import HypGraphRenderer
 
 
-def translate_model(queue, rqueue, pid, models, options, k, normalization_alpha, verbose, nbest, return_alignment, suppress_unk, return_hyp_graph, deviceid):
+def translate_model(queue, rqueue, pid, models, options, k, start_idx,
+                    normalization_alpha, verbose, nbest, return_alignment,
+                    suppress_unk, return_hyp_graph, deviceid):
 
     # if the --device-list argument is set
     if deviceid != '':
@@ -115,8 +117,10 @@ def print_matrices(mm, file):
         print >>file, "\n"
 
 
-def main(models, source_file, saveto, save_alignment=None, k=5,
-         normalization_alpha=0.0, n_process=5, chr_level=False, verbose=False, nbest=False, suppress_unk=False, a_json=False, print_word_probabilities=False, return_hyp_graph=False, device_list=[]):
+def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0, 
+         normalization_alpha=0.0, n_process=5, chr_level=False, verbose=False,
+         nbest=False, suppress_unk=False, a_json=False, print_word_probabilities=False,
+         return_hyp_graph=False, device_list=[]):
     # load model model_options
     options = []
     for model in models:
@@ -161,9 +165,10 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
         deviceid = ''
         if device_list is not None and len(device_list) != 0:
             deviceid = device_list[midx % len(device_list)].strip()
-        processes[midx] = Process(
-            target=translate_model,
-            args=(queue, rqueue, midx, models, options, k, normalization_alpha, verbose, nbest, save_alignment is not None, suppress_unk, return_hyp_graph, deviceid))
+        processes[midx] = Process(target=translate_model,
+                                  args=(queue, rqueue, midx, models, options, k, start_idx,
+                                        normalization_alpha, verbose, nbest, save_alignment is not None,
+                                        suppress_unk, return_hyp_graph, deviceid))
         processes[midx].start()
 
     # utility function
@@ -178,6 +183,8 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
     def _send_jobs(f):
         source_sentences = []
         for idx, line in enumerate(f):
+            if idx < start_idx:
+                continue
             if chr_level:
                 words = list(line.decode('utf-8').strip())
             else:
@@ -194,9 +201,9 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
                 x.append(w)
 
             x += [[0]*options[0]['factors']]
-            queue.put((idx, x))
+            queue.put((idx-start_idx, x))
             source_sentences.append(words)
-        return idx+1, source_sentences
+        return idx+1-start_idx, source_sentences
 
     def _finish_processes():
         for midx in xrange(n_process):
@@ -245,7 +252,7 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
                     probs = " ||| " + " ".join("{0}".format(prob) for prob in word_probs[j])
                 else:
                     probs = ""
-                saveto.write('{0} ||| {1} ||| {2}{3}\n'.format(i, _seqs2words(samples[j]), scores[j], probs))
+                saveto.write('{0} ||| {1} ||| {2}{3}\n'.format(i+start_idx, _seqs2words(samples[j]), scores[j], probs))
                 # print alignment matrix for each hypothesis
                 # header: sentence id ||| translation ||| score ||| source ||| source_token_count+eos translation_token_count+eos
                 if save_alignment is not None:
@@ -253,7 +260,7 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
                         print_matrix_json(alignment[j], source_sentences[i], _seqs2words(samples[j]).split(), i, i+j,save_alignment)
                     else:
                         save_alignment.write('{0} ||| {1} ||| {2} ||| {3} ||| {4} {5}\n'.format(
-                                             i, _seqs2words(samples[j]), scores[j], ' '.join(source_sentences[i]) , len(source_sentences[i])+1, len(samples[j])))
+                                             i+start_idx, _seqs2words(samples[j]), scores[j], ' '.join(source_sentences[i]) , len(source_sentences[i])+1, len(samples[j])))
                         print_matrix(alignment[j], save_alignment)
         else:
             samples, scores, word_probs, alignment, hyp_graph = trans
@@ -271,7 +278,8 @@ def main(models, source_file, saveto, save_alignment=None, k=5,
                     print_matrix_json(alignment, source_sentences[i], _seqs2words(trans[0]).split(), i, i,save_alignment)
                 else:
                     save_alignment.write('{0} ||| {1} ||| {2} ||| {3} ||| {4} {5}\n'.format(
-                                         i, _seqs2words(trans[0]), 0, ' '.join(source_sentences[i]) , len(source_sentences[i])+1, len(trans[0])))
+                                         i+start_idx, _seqs2words(trans[0]), 0, ' '.join(source_sentences[i]),
+                                                                  len(source_sentences[i])+1, len(trans[0])))
                     print_matrix(alignment, save_alignment)
 
     sys.stderr.write('Done\n')
@@ -287,6 +295,8 @@ if __name__ == "__main__":
                         help="Normalize scores by sentence length (with argument, exponentiate lengths by ALPHA)")
     parser.add_argument('-c', action="store_true", help="Character-level")
     parser.add_argument('-v', action="store_true", help="verbose mode.")
+    parser.add_argument('--start-idx', '-si', type=int, default=0, 
+                        help="Index of sentence to start translate from (default: %(default)s))")
     parser.add_argument('--models', '-m', type=str, nargs = '+', required=True,
                         help="model to use. Provide multiple models (with same vocabulary) for ensemble decoding")
     parser.add_argument('--input', '-i', type=argparse.FileType('r'),
@@ -311,6 +321,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args.models, args.input,
-         args.output, k=args.k, normalization_alpha=args.n, n_process=args.p,
+         args.output, k=args.k, start_idx=args.start_idx, normalization_alpha=args.n, n_process=args.p,
          chr_level=args.c, verbose=args.v, nbest=args.n_best, suppress_unk=args.suppress_unk, 
-         print_word_probabilities = args.print_word_probabilities, save_alignment=args.output_alignment, a_json=args.json_alignment, return_hyp_graph=args.search_graph, device_list=args.device_list)
+         print_word_probabilities = args.print_word_probabilities, save_alignment=args.output_alignment,
+         a_json=args.json_alignment, return_hyp_graph=args.search_graph, device_list=args.device_list)
