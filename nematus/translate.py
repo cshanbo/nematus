@@ -184,8 +184,6 @@ def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0,
                 src_idx = numpy.argmax(alignment[i])
                 if numpy.argmax(alignment[i]) < src_len:
                     ww.append(source_sentence[src_idx])
-                # else:
-                #     ww.append("<EOS>")
             else:
                 ww.append(word_idict_trg[cc[i]])
         return ' '.join(ww)
