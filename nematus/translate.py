@@ -119,7 +119,8 @@ def print_matrices(mm, file):
 
 def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0, 
          normalization_alpha=0.0, n_process=5, chr_level=False, verbose=False,
-         nbest=False, suppress_unk=False, a_json=False, print_word_probabilities=False,
+         nbest=False, suppress_unk=False, unk_replace=False, 
+         a_json=False, print_word_probabilities=False,
          return_hyp_graph=False, device_list=[]):
     # load model model_options
     options = []
@@ -167,17 +168,26 @@ def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0,
             deviceid = device_list[midx % len(device_list)].strip()
         processes[midx] = Process(target=translate_model,
                                   args=(queue, rqueue, midx, models, options, k, start_idx,
-                                        normalization_alpha, verbose, nbest, save_alignment is not None,
+                                        normalization_alpha, verbose, nbest,
+                                        save_alignment is not None or unk_replace,
                                         suppress_unk, return_hyp_graph, deviceid))
         processes[midx].start()
 
     # utility function
-    def _seqs2words(cc):
+    def _seqs2words(cc, source_sentence, alignment=None):
         ww = []
-        for w in cc:
-            if w == 0:
+        src_len = len(source_sentence)
+        for i in xrange(len(cc)):
+            if cc[i] == 0:
                 break
-            ww.append(word_idict_trg[w])
+            if unk_replace and alignment is not None and cc[i] == 1:
+                src_idx = numpy.argmax(alignment[i])
+                if numpy.argmax(alignment[i]) < src_len:
+                    ww.append(source_sentence[src_idx])
+                # else:
+                #     ww.append("<EOS>")
+            else:
+                ww.append(word_idict_trg[cc[i]])
         return ' '.join(ww)
 
     def _send_jobs(f):
@@ -252,15 +262,16 @@ def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0,
                     probs = " ||| " + " ".join("{0}".format(prob) for prob in word_probs[j])
                 else:
                     probs = ""
-                saveto.write('{0} ||| {1} ||| {2}{3}\n'.format(i+start_idx, _seqs2words(samples[j]), scores[j], probs))
+                saveto.write('{0} ||| {1} ||| {2}{3}\n'.format(i+start_idx, _seqs2words(samples[j], source_sentences[i], alignment[j]), scores[j], probs))
                 # print alignment matrix for each hypothesis
                 # header: sentence id ||| translation ||| score ||| source ||| source_token_count+eos translation_token_count+eos
                 if save_alignment is not None:
                     if a_json:
-                        print_matrix_json(alignment[j], source_sentences[i], _seqs2words(samples[j]).split(), i, i+j,save_alignment)
+                        print_matrix_json(alignment[j], source_sentences[i], _seqs2words(samples[j], source_sentences[i], alignment[j]).split(), i, i+j,save_alignment)
                     else:
                         save_alignment.write('{0} ||| {1} ||| {2} ||| {3} ||| {4} {5}\n'.format(
-                                             i+start_idx, _seqs2words(samples[j]), scores[j], ' '.join(source_sentences[i]) , len(source_sentences[i])+1, len(samples[j])))
+                                             i+start_idx, _seqs2words(samples[j], source_sentences[i], alignment[j]),
+                                             scores[j], ' '.join(source_sentences[i]) , len(source_sentences[i])+1, len(samples[j])))
                         print_matrix(alignment[j], save_alignment)
         else:
             samples, scores, word_probs, alignment, hyp_graph = trans
@@ -268,17 +279,18 @@ def main(models, source_file, saveto, save_alignment=None, k=5, start_idx=0,
                 renderer = HypGraphRenderer(hyp_graph)
 		renderer.wordify(word_idict_trg)
                 renderer.save_png(return_hyp_graph, detailed=True, highlight_best=True)
-            saveto.write(_seqs2words(samples) + "\n")
+            saveto.write(_seqs2words(samples, source_sentences[i], alignment) + "\n")
             if print_word_probabilities:
                 for prob in word_probs:
                     saveto.write("{} ".format(prob))
                 saveto.write('\n')
             if save_alignment is not None:
                 if a_json:
-                    print_matrix_json(alignment, source_sentences[i], _seqs2words(trans[0]).split(), i, i,save_alignment)
+                    print_matrix_json(alignment, source_sentences[i],
+                                      _seqs2words(trans[0], source_sentences[i], alignment).split(), i, i,save_alignment)
                 else:
                     save_alignment.write('{0} ||| {1} ||| {2} ||| {3} ||| {4} {5}\n'.format(
-                                         i+start_idx, _seqs2words(trans[0]), 0, ' '.join(source_sentences[i]),
+                                         i+start_idx, _seqs2words(trans[0], source_sentences[i], alignment), 0, ' '.join(source_sentences[i]),
                                                                   len(source_sentences[i])+1, len(trans[0])))
                     print_matrix(alignment, save_alignment)
 
@@ -295,6 +307,7 @@ if __name__ == "__main__":
                         help="Normalize scores by sentence length (with argument, exponentiate lengths by ALPHA)")
     parser.add_argument('-c', action="store_true", help="Character-level")
     parser.add_argument('-v', action="store_true", help="verbose mode.")
+    parser.add_argument('--unk-replace', action="store_true", help="Replace UNK with source word based on attention model")
     parser.add_argument('--start-idx', '-si', type=int, default=0, 
                         help="Index of sentence to start translate from (default: %(default)s))")
     parser.add_argument('--models', '-m', type=str, nargs = '+', required=True,
@@ -322,6 +335,7 @@ if __name__ == "__main__":
 
     main(args.models, args.input,
          args.output, k=args.k, start_idx=args.start_idx, normalization_alpha=args.n, n_process=args.p,
-         chr_level=args.c, verbose=args.v, nbest=args.n_best, suppress_unk=args.suppress_unk, 
-         print_word_probabilities = args.print_word_probabilities, save_alignment=args.output_alignment,
-         a_json=args.json_alignment, return_hyp_graph=args.search_graph, device_list=args.device_list)
+         chr_level=args.c, verbose=args.v, nbest=args.n_best, suppress_unk=args.suppress_unk,
+         unk_replace=args.unk_replace, print_word_probabilities = args.print_word_probabilities,
+         save_alignment=args.output_alignment, a_json=args.json_alignment,
+         return_hyp_graph=args.search_graph, device_list=args.device_list)
